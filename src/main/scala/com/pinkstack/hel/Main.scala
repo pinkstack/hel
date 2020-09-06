@@ -1,8 +1,8 @@
 package com.pinkstack.hel
 
 import akka.NotUsed
-import akka.actor.ActorSystem
-import akka.stream.{Attributes, ThrottleMode}
+import akka.actor.{ActorSystem, Cancellable}
+import akka.stream.{Attributes, ClosedShape, ThrottleMode}
 import akka.stream.scaladsl._
 import com.pinkstack.hel.clients.{RadarClient, Spin3Client}
 import com.typesafe.config.{Config, ConfigFactory}
@@ -43,28 +43,24 @@ object Main extends App with LazyLogging {
 
   import system.dispatcher
 
-  val loggingAttributes = Attributes.logLevels(
+  private[this] val loggingAttributes = Attributes.logLevels(
     onElement = Attributes.LogLevels.Debug,
     onFinish = Attributes.LogLevels.Info,
     onFailure = Attributes.LogLevels.Debug)
 
-  val g = Source.tick(0.seconds, 5.seconds, Tick)
-    .log(name = "tickStream")
-    .addAttributes(loggingAttributes)
-    .via {
-      // RadarFlow().flow
-      Spin3Flow().flow
-    }
-    // .map(_.noSpaces)
-    .runWith(Sink.foreach(println))
+  RunnableGraph.fromGraph(GraphDSL.create() { implicit b =>
+    import GraphDSL.Implicits._
 
-  g.onComplete {
-    case Success(value) =>
-      println(value)
-      system.terminate()
-    case Failure(exception) =>
-      System.err.println(exception)
-      system.terminate()
-  }
+    val in = Source(1 to 10)
+    val out = Sink.foreach(println)
 
+    val broadcast = b.add(Broadcast[Int](2))
+    val merge = b.add(Merge[Int](2))
+
+    val f1, f2, f3, f4 = Flow[Int].map(_ * 2)
+
+    in ~> f1 ~> broadcast ~> f2 ~> merge ~> f3 ~> out
+    broadcast ~> f4 ~> merge
+    ClosedShape
+  }).run()
 }
