@@ -16,15 +16,16 @@ import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 import scala.jdk.DurationConverters._
 
-case object Tick
+sealed trait Tick
+case object Tick extends Tick
 
 sealed trait GenericClientFlow {
   def config: Config
 
   def fetchMethod: Future[Option[Vector[Json]]]
 
-  val flow: Flow[Tick.type, Json, NotUsed] =
-    Flow[Tick.type]
+  val flow: Flow[Tick, Json, NotUsed] =
+    Flow[Tick]
       .mapAsync(config.getInt("hel.clients.parallelism")) { _ => fetchMethod }
       .collect {
         case Some(value: Vector[Json]) => value
@@ -51,7 +52,7 @@ final case class Ticker()(implicit config: Config) {
   }
 }
 
-object Main extends App with LazyLogging {
+object MainOld extends App with LazyLogging {
   implicit val config: Config = ConfigFactory.load
   implicit val system: ActorSystem = ActorSystem("hel")
 
@@ -61,7 +62,7 @@ object Main extends App with LazyLogging {
     val in = Ticker().tick
     val out = Sink.foreach(println)
 
-    val broadcast = b.add(Broadcast[Tick.type](2))
+    val broadcast = b.add(Broadcast[Tick](2))
     val merge = b.add(Merge[Json](2))
 
     val throttle = Flow[Json].throttle(1, 200.millis, 10, ThrottleMode.Shaping)

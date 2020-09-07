@@ -30,6 +30,7 @@ libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % "2.6.8",
   "com.typesafe.akka" %% "akka-stream" % "2.6.8",
   "com.typesafe.akka" %% "akka-http" % "10.2.0",
+  "com.github.pureconfig" %% "pureconfig-akka" % "0.13.0",
 
   // JSON (Circe)
   "de.heikoseeberger" %% "akka-http-circe" % "1.34.0",
