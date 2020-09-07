@@ -47,7 +47,7 @@ final case class RadarClient()(implicit system: ActorSystem, config: Config) ext
 
   val activeEvents: Future[Option[Vector[Json]]] = {
     for {
-      token <- OptionT.fromOption[Future](config.getString("promet.radar.token").some)
+      token <- OptionT.fromOption[Future](config.getString("hel.radar.token").some)
       request = HttpRequest(
         uri = s"https://radar.topapp.si/mobile/api/v1/events/active",
         headers = Seq(RawHeader("Authorization", token))
