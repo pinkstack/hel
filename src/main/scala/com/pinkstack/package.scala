@@ -13,7 +13,9 @@ import scala.concurrent.duration._
 
 package object pinkstack {
 
-  case object Tick
+  sealed trait Tick
+
+  case object Tick extends Tick
 
   sealed trait GenericClientFlow {
     def config: Config
@@ -28,7 +30,6 @@ package object pinkstack {
           case None => throw new Exception("Problem with fetching events.")
         }
         .flatMapConcat(Source(_))
-        .throttle(1, 100.millis, 10, ThrottleMode.Shaping)
   }
 
   final case class RadarFlow()(implicit val system: ActorSystem, val config: Config) extends GenericClientFlow {
@@ -41,8 +42,9 @@ package object pinkstack {
 
   final case class Ticker()(implicit config: Config) {
     val tick: Source[Tick.type, Cancellable] = {
-      val Seq(initialDelay, interval) = Seq("hel.collection.initial_delay", "hel.collection.interval")
-        .map(config.getDuration(_).toScala)
+      val Seq(initialDelay, interval) = Seq(
+        "hel.collection.initial-delay", "hel.collection.interval"
+      ).map(config.getDuration(_).toScala)
 
       Source.tick(initialDelay, interval, Tick)
     }

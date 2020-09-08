@@ -8,7 +8,7 @@ import akka.{Done, NotUsed}
 import akka.actor.{ActorSystem, Cancellable}
 import akka.stream.Attributes
 import akka.stream.scaladsl._
-import com.pinkstack.hel.Tick
+import com.pinkstack.Tick
 import com.typesafe.config.Config
 import io.circe.Json
 import pureconfig.ConfigReader.Result
@@ -16,9 +16,6 @@ import pureconfig.error.ConfigReaderFailures
 
 import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
-
-trait Ticker
-
 import pureconfig._
 import pureconfig.generic.auto._
 
