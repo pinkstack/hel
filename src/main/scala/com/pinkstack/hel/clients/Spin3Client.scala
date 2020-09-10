@@ -55,9 +55,10 @@ final case class Spin3Client()(implicit system: ActorSystem, config: Config) ext
     _.hcursor.downField("value").focus.map(transformations).flatMap(_.asArray)
   }
 
-  val locationEvents: Future[Option[Vector[Json]]] = {
-    val request = HttpRequest(uri = s"https://spin3.sos112.si/javno/assets/data/lokacija.json")
+  def locationEvents: Future[Option[Vector[Json]]] = {
     for {
+      spinUrl <- OptionT.fromOption[Future](config.getString("hel.spin3.url").some)
+      request = HttpRequest(uri = spinUrl + s"/javno/assets/data/lokacija.json")
       r <- OptionT.liftF(Http().singleRequest(request).filter(_.status.isSuccess()))
       json <- OptionT.liftF(Unmarshal(r).to[Json])
       events <- OptionT.fromOption[Future](transformEvents(json))

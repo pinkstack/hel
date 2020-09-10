@@ -1,5 +1,7 @@
 package com
 
+import cats._
+import cats.implicits._
 import akka.NotUsed
 import akka.actor.{ActorSystem, Cancellable}
 import akka.stream.ThrottleMode
@@ -22,22 +24,24 @@ package object pinkstack {
 
     def fetchMethod: Future[Option[Vector[Json]]]
 
-    val flow: Flow[Tick.type, Json, NotUsed] =
+    def flow: Flow[Tick.type, Json, NotUsed] =
       Flow[Tick.type]
-        .mapAsync(config.getInt("hel.clients.parallelism")) { _ => fetchMethod }
+        .mapAsyncUnordered(1)(_ => fetchMethod)
         .collect {
           case Some(value: Vector[Json]) => value
           case None => throw new Exception("Problem with fetching events.")
         }
-        .flatMapConcat(Source(_))
+        .flatMapConcat(v =>
+          Source(v)
+        )
   }
 
   final case class RadarFlow()(implicit val system: ActorSystem, val config: Config) extends GenericClientFlow {
-    val fetchMethod: Future[Option[Vector[Json]]] = RadarClient().activeEvents
+    def fetchMethod: Future[Option[Vector[Json]]] = RadarClient().activeEvents
   }
 
   final case class Spin3Flow()(implicit val system: ActorSystem, val config: Config) extends GenericClientFlow {
-    val fetchMethod: Future[Option[Vector[Json]]] = Spin3Client().locationEvents
+    def fetchMethod: Future[Option[Vector[Json]]] = Spin3Client().locationEvents
   }
 
   final case class Ticker()(implicit config: Config) {

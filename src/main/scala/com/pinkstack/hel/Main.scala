@@ -24,17 +24,26 @@ object Main extends App with LazyLogging {
   RunnableGraph.fromGraph(GraphDSL.create() { implicit b =>
     import GraphDSL.Implicits._
 
-    val in = Ticker().tick
+    val in = Ticker().tick.log("ticker")
+      .addAttributes(Attributes.logLevels(
+        onElement = Attributes.LogLevels.Info,
+        onFinish = Attributes.LogLevels.Info,
+        onFailure = Attributes.LogLevels.Info))
+
     val out = Sink.foreach(println)
 
-    val broadcast = b.add(Broadcast[Tick.type](2))
-    val merge = b.add(Merge[Json](2))
+    val broadcast = b.add(Broadcast[Tick.type](1))
+    val merge = b.add(Merge[Json](1))
 
-    val throttle = Flow[Json].throttle(1, 200.millis, 10, ThrottleMode.Shaping)
+    val throttle = Flow[Json]
+      // .throttle(1, 200.millis, 10, ThrottleMode.Shaping)
+      .map {
+        json => json.hcursor.downField("event_id").focus
+      }.collectType[Some[String]]
 
     // @formatter:off
-    in ~> broadcast ~> RadarFlow().flow ~> merge ~> throttle ~> out
-          broadcast ~> Spin3Flow().flow ~> merge
+    in ~> broadcast ~> Spin3Flow().flow ~> merge ~> throttle ~> out
+    //      broadcast ~> RadarFlow().flow ~> merge
     // @formatter:on
 
     ClosedShape

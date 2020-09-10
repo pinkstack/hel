@@ -1,0 +1,16 @@
+version: "3.8"
+services:
+  gateway:
+    build:
+      context: ./.docker/gateway
+      dockerfile: Dockerfile
+    ports:
+      - "7070:80"
+      - "7071:81"
+    cap_add:
+      - ALL
+    environment:
+      - NGINX_PORT=80
+    volumes:
+      - ./.docker/gateway/nginx.conf:/etc/nginx/nginx.conf
+      #- /var/run/docker.sock:/tmp/docker.sock:ro

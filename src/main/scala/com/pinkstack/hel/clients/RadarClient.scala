@@ -45,11 +45,11 @@ final case class RadarClient()(implicit system: ActorSystem, config: Config) ext
     _.hcursor.downField("events").focus.map(transformation).flatMap(_.asArray)
   }
 
-  val activeEvents: Future[Option[Vector[Json]]] = {
+  def activeEvents: Future[Option[Vector[Json]]] = {
     for {
       token <- OptionT.fromOption[Future](config.getString("hel.radar.token").some)
       request = HttpRequest(
-        uri = s"https://radar.topapp.si/mobile/api/v1/events/active",
+        uri = s"${config.getString("hel.radar.url")}/mobile/api/v1/events/active",
         headers = Seq(RawHeader("Authorization", token))
       )
       r <- OptionT.liftF(Http().singleRequest(request).filter(_.status.isSuccess()))
