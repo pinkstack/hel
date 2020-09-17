@@ -31,9 +31,7 @@ package object pinkstack {
           case Some(value: Vector[Json]) => value
           case None => throw new Exception("Problem with fetching events.")
         }
-        .flatMapConcat(v =>
-          Source(v)
-        )
+        .mapConcat(identity)
   }
 
   final case class RadarFlow()(implicit val system: ActorSystem, val config: Config) extends GenericClientFlow {
@@ -53,5 +51,4 @@ package object pinkstack {
       Source.tick(initialDelay, interval, Tick)
     }
   }
-
 }

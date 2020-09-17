@@ -1,12 +1,12 @@
-package com.pinkstack.experimental
+package com.pinkstack.experimental_one
 
 import cats._
 import cats.implicits._
 import cats.data.Kleisli
 import com.typesafe.scalalogging.LazyLogging
 import akka.{Done, NotUsed}
-import akka.actor.{ActorSystem, Cancellable}
-import akka.stream.Attributes
+import akka.actor.{ActorSystem, Cancellable, ClassicActorSystemProvider}
+import akka.stream.{ActorMaterializer, Attributes, Materializer, SystemMaterializer}
 import akka.stream.scaladsl._
 import com.pinkstack.Tick
 import com.typesafe.config.Config
@@ -51,7 +51,7 @@ object RadarFlow {
 }
 
 object Main extends App with LazyLogging {
-  def appFromConfig(implicit system: ActorSystem): Kleisli[Option, HelConfig, Future[Done]] =
+  def appFromConfig(system: ActorSystem): Kleisli[Option, HelConfig, Future[Done]] = {
     for {
       ticker <- Ticker.fromConfig.local[HelConfig](_.collection)
       flow <- RadarFlow.fromConfig.local[HelConfig](_.radar)
@@ -63,8 +63,9 @@ object Main extends App with LazyLogging {
           onFinish = Attributes.LogLevels.Info,
           onFailure = Attributes.LogLevels.Info))
         .via(flow)
-        .runWith(Sink.foreach(println))
+        .runWith(Sink.foreach(println))(SystemMaterializer(system).materializer)
     }
+  }
 
   val f: Either[ConfigReaderFailures, Option[Future[Done]]] = for {
     helConfig <- HelConfig.load

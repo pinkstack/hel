@@ -39,7 +39,7 @@ object Main extends App with LazyLogging {
       // .throttle(1, 200.millis, 10, ThrottleMode.Shaping)
       .map {
         json => json.hcursor.downField("event_id").focus
-      }.collectType[Some[String]]
+      }
 
     // @formatter:off
     in ~> broadcast ~> Spin3Flow().flow ~> merge ~> throttle ~> out
