@@ -3,16 +3,14 @@ package com.hel.clients
 import java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME
 import java.time.{LocalDateTime, ZoneOffset}
 
-import cats._
-import cats.implicits._
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.stream.Attributes
-import akka.stream.scaladsl.{Flow, RestartFlow, RestartWithBackoffFlow}
+import akka.stream.scaladsl.{Flow, RestartFlow}
 import cats.data.{Kleisli, OptionT}
+import cats.implicits._
 import com.hel.{Configuration, Ticker}
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
@@ -62,11 +60,6 @@ object SpinFlow extends JsonOptics {
     case (actorSystem: ActorSystem, config: Configuration.Spin) =>
       RestartFlow.onFailuresWithBackoff(2.seconds, 10.seconds, 0.3, 10) { () =>
         Flow[Ticker.Tick]
-          .log("ticker")
-          // .addAttributes(Attributes.logLevels(
-          //   onElement = Attributes.LogLevels.Info,
-          //   onFinish = Attributes.LogLevels.Info,
-          //   onFailure = Attributes.LogLevels.Info))
           .mapAsyncUnordered(config.parallelism)(_ => fetch(actorSystem, config))
           .collect {
             case Some(value) => value

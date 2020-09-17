@@ -1,11 +1,8 @@
 package com.hel.clients
 
 import java.time.format.DateTimeFormatter
-import java.time.{LocalDateTime, ZoneId, ZoneOffset}
-import java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME
+import java.time.{LocalDateTime, ZoneId}
 
-import cats._
-import cats.implicits._
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
@@ -14,7 +11,7 @@ import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.scaladsl.{Flow, RestartFlow}
 import cats.data.{Kleisli, OptionT}
-import com.hel.clients.SpinFlow.mutateField
+import cats.implicits._
 import com.hel.{Configuration, Ticker}
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
@@ -73,9 +70,7 @@ object RadarFlow extends JsonOptics {
   val fromConfig: Kleisli[Option, (ActorSystem, Configuration.Radar), Flow[Ticker.Tick, Json, NotUsed]] = Kleisli {
     case (actorSystem: ActorSystem, config: Configuration.Radar) =>
       RestartFlow.onFailuresWithBackoff(config.minBackoff, config.maxBackoff, config.randomFactor, config.maxRestarts) { () =>
-        Flow[Ticker.Tick].mapAsyncUnordered(config.parallelism) { _ =>
-          fetch(actorSystem, config)
-        }.collect {
+        Flow[Ticker.Tick].mapAsyncUnordered(config.parallelism)(_ => fetch(actorSystem, config)).collect {
           case Some(value) => value
           case _ =>
             System.out.println("Crash!")
