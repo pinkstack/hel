@@ -1,3 +1,5 @@
+.env.user
+
 hacking/
 
 *.class

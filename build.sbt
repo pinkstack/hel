@@ -51,3 +51,8 @@ scalacOptions ++= Seq(
   "-language:postfixOps",
   "-language:higherKinds"
 )
+
+enablePlugins(JavaAppPackaging)
+
+mainClass in assembly := Some("com.hel.Main")
+assemblyJarName in assembly := "hel.jar"

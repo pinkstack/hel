@@ -10,6 +10,6 @@ object Ticker {
 
   final object Tick extends Tick
 
-  val fromConfig: Kleisli[Option, Configuration.Collection, Source[Tick, Cancellable]] =
+  val fromConfig: Kleisli[Option, Configuration.Ticker, Source[Tick, Cancellable]] =
     Kleisli(c => Some(Source.tick(c.initialDelay, c.interval, Tick)))
 }

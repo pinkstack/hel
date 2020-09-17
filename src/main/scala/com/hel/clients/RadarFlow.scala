@@ -12,7 +12,7 @@ import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.stream.scaladsl.Flow
+import akka.stream.scaladsl.{Flow, RestartFlow}
 import cats.data.{Kleisli, OptionT}
 import com.hel.clients.SpinFlow.mutateField
 import com.hel.{Configuration, Ticker}
@@ -72,13 +72,15 @@ object RadarFlow extends JsonOptics {
 
   val fromConfig: Kleisli[Option, (ActorSystem, Configuration.Radar), Flow[Ticker.Tick, Json, NotUsed]] = Kleisli {
     case (actorSystem: ActorSystem, config: Configuration.Radar) =>
-      Flow[Ticker.Tick].mapAsyncUnordered(1) { _ =>
-        fetch(actorSystem, config)
-      }.collect {
-        case Some(value) => value
-        case _ =>
-          System.out.println("Crash!")
-          throw new Exception("Something else...")
-      }.mapConcat(identity).some
+      RestartFlow.onFailuresWithBackoff(config.minBackoff, config.maxBackoff, config.randomFactor, config.maxRestarts) { () =>
+        Flow[Ticker.Tick].mapAsyncUnordered(config.parallelism) { _ =>
+          fetch(actorSystem, config)
+        }.collect {
+          case Some(value) => value
+          case _ =>
+            System.out.println("Crash!")
+            throw new Exception("Something else...")
+        }.mapConcat(identity)
+      }.some
   }
 }

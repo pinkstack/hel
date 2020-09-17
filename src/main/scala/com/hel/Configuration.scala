@@ -8,21 +8,30 @@ import pureconfig.ConfigSource
 import scala.concurrent.duration.FiniteDuration
 
 object Configuration {
+
   import pureconfig.generic.auto._
 
-  final case class Config(collection: Collection,
-                          clients: Clients,
+  final case class Config(ticker: Ticker,
                           radar: Radar,
                           spin: Spin)
 
-  final case class Collection(initialDelay: FiniteDuration,
-                              interval: FiniteDuration)
+  final case class Ticker(initialDelay: FiniteDuration,
+                          interval: FiniteDuration)
 
-  final case class Clients(parallelism: Int)
+  final case class Radar(url: URL,
+                         token: String,
+                         parallelism: Int,
+                         minBackoff: FiniteDuration,
+                         maxBackoff: FiniteDuration,
+                         randomFactor: Double,
+                         maxRestarts: Int)
 
-  final case class Radar(url: URL, token: String)
-
-  final case class Spin(url: URL)
+  final case class Spin(url: URL,
+                        parallelism: Int,
+                        minBackoff: FiniteDuration,
+                        maxBackoff: FiniteDuration,
+                        randomFactor: Double,
+                        maxRestarts: Int)
 
   final def load: Result[Config] = ConfigSource.default.at("hel").load[Config]
 }

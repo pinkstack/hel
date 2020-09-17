@@ -11,13 +11,13 @@ import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.Attributes
-import akka.stream.scaladsl.Flow
+import akka.stream.scaladsl.{Flow, RestartFlow, RestartWithBackoffFlow}
 import cats.data.{Kleisli, OptionT}
 import com.hel.{Configuration, Ticker}
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
 import scala.concurrent.Future
-
+import scala.concurrent.duration._
 
 object SpinFlow extends JsonOptics {
 
@@ -60,22 +60,21 @@ object SpinFlow extends JsonOptics {
 
   val fromConfig: Kleisli[Option, (ActorSystem, Configuration.Spin), Flow[Ticker.Tick, Json, NotUsed]] = Kleisli {
     case (actorSystem: ActorSystem, config: Configuration.Spin) =>
-      Flow[Ticker.Tick]
-        .log("ticker")
-        .addAttributes(Attributes.logLevels(
-          onElement = Attributes.LogLevels.Info,
-          onFinish = Attributes.LogLevels.Info,
-          onFailure = Attributes.LogLevels.Info))
-        .mapAsyncUnordered(1) { _ =>
-          fetch(actorSystem, config)
-        }
-        .collect {
-          case Some(value) => value
-          case _ =>
-            System.out.println("Bang!")
-            throw new Exception("Something else...")
-        }.mapConcat(identity)
-        .some
+      RestartFlow.onFailuresWithBackoff(2.seconds, 10.seconds, 0.3, 10) { () =>
+        Flow[Ticker.Tick]
+          .log("ticker")
+          // .addAttributes(Attributes.logLevels(
+          //   onElement = Attributes.LogLevels.Info,
+          //   onFinish = Attributes.LogLevels.Info,
+          //   onFailure = Attributes.LogLevels.Info))
+          .mapAsyncUnordered(config.parallelism)(_ => fetch(actorSystem, config))
+          .collect {
+            case Some(value) => value
+            case None =>
+              System.out.println("💥 Bang! 💥")
+              throw new Exception("Data could not be transformed.")
+          }.mapConcat(identity)
+      }.some
   }
 }
 

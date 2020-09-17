@@ -1,9 +1,9 @@
 package com.hel
 
-import akka.NotUsed
-import akka.actor.ActorSystem
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, RunnableGraph, Sink}
-import akka.stream.{ClosedShape, SystemMaterializer, ThrottleMode}
+import akka.actor.{ActorSystem, Cancellable}
+import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, Sink, Source}
+import akka.stream.{FlowShape, SystemMaterializer, ThrottleMode}
+import akka.{Done, NotUsed}
 import cats.data._
 import cats.implicits._
 import com.hel.clients.{RadarFlow, SpinFlow}
@@ -12,45 +12,57 @@ import com.typesafe.scalalogging.LazyLogging
 import io.circe.Json
 import pureconfig.ConfigSource
 
+import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.{Failure, Success}
 
 object Application {
   type Environment = (ActorSystem, Configuration.Config)
+  type CollectionFlow = Flow[Ticker.Tick, Json, NotUsed]
+  type OutFlow = Flow[Ticker.Tick, String, NotUsed]
 
-  val run: (Configuration.Config, Config) => Option[NotUsed] = { (appConfig, systemConfig) =>
-    val build: ReaderT[Option, Environment, RunnableGraph[NotUsed]] = {
-      for {
-        ticker <- Ticker.fromConfig.local[Environment](_._2.collection)
-        spin <- SpinFlow.fromConfig.local[Environment](c => (c._1, c._2.spin))
-        radar <- RadarFlow.fromConfig.local[Environment](c => (c._1, c._2.radar))
-      } yield {
-        RunnableGraph.fromGraph(GraphDSL.create() { implicit b =>
+  val run: (Configuration.Config, Config) => Option[Future[Done]] = { (appConfig, systemConfig) =>
+    val tickToCollection: (CollectionFlow, CollectionFlow) => OutFlow =
+      (spin, radar) =>
+        Flow.fromGraph(GraphDSL.create() { implicit b =>
           import GraphDSL.Implicits._
 
-          val out = Sink.foreach(println)
-
-          val broadcast = b.add(Broadcast[Ticker.Tick](1))
-          val merge = b.add(Merge[Json](1))
-
+          val broadcast = b.add(Broadcast[Ticker.Tick](2))
+          val merge = b.add(Merge[Json](2))
           val throttle = Flow[Json]
             .throttle(10, 100.millis, 10, ThrottleMode.Shaping)
-            .map { json => json.noSpacesSortKeys }
+            .map { json =>
+              json.noSpacesSortKeys
+              // json.hcursor.downField("event_id").focus.map(_.noSpacesSortKeys).getOrElse("no location")
+            }
+          val out = b.add(Broadcast[String](1))
 
           // @formatter:off
-          ticker ~> broadcast ~> spin ~> merge ~> throttle ~> out
-                    broadcast ~> radar ~> merge
+          broadcast.out(0) ~> spin  ~> merge.in(0)
+          broadcast.out(1) ~> radar ~> merge.in(1)
+                                       merge.out ~> throttle ~> out
           // @formatter:on
 
-          ClosedShape
+          FlowShape(broadcast.in, out.out(0))
         })
-      }
-    }
 
-    Some(ActorSystem("hel", systemConfig)).map { system =>
-      build.run(system, appConfig).map { graph =>
-        graph.run()(SystemMaterializer(system).materializer)
+    val collectionSource: ReaderT[Option, Environment, Source[String, Cancellable]] = for {
+      ticker <- Ticker.fromConfig.local[Environment](_._2.ticker)
+      spin <- SpinFlow.fromConfig.local[Environment](c => (c._1, c._2.spin))
+      radar <- RadarFlow.fromConfig.local[Environment](c => (c._1, c._2.radar))
+    } yield ticker.via(tickToCollection(spin, radar))
+
+    ActorSystem("hel", systemConfig).some.map { system =>
+      collectionSource(system, appConfig).map { graph =>
+        import system.dispatcher
+        graph.runWith(Sink.foreach(println))(SystemMaterializer(system).materializer) andThen {
+          case Success(_) =>
+          case Failure(exception) =>
+            System.err.println(exception)
+            system.terminate()
+        }
       }
-    }.getOrElse(throw new Exception("Never"))
+    }.getOrElse(throw new Exception("Never!"))
   }
 }
 
