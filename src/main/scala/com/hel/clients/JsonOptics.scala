@@ -58,14 +58,15 @@ trait JsonOptics {
   private[this] val stringToSnakeCase: String => String =
     _.replaceAll("(.)(\\p{Upper})", "$1_$2").toLowerCase()
 
-  val transformKeys: Json => Json = { input =>
-    def transform(js: Json)(f: String => String): Json =
-      js.mapString(f)
-        .mapArray(_.map(transform(_)(f)))
-        .mapObject(obj => JsonObject.apply({
-          obj.toMap.map { case (k, v) => f(k) -> v }
-        }.toSeq: _*))
 
-    transform(input)(stringToSnakeCase)
-  }
+  private[this] def transform(js: Json)(f: String => String): Json =
+    js.mapString(f)
+      .mapArray(_.map(transform(_)(f)))
+      .mapObject(obj => JsonObject.apply({
+        obj.toMap.map { case (k, v) => f(k) -> v }
+      }.toSeq: _*))
+
+  val transformKeys: Json => Json = transformKeysWith(stringToSnakeCase)(_)
+
+  def transformKeysWith(f: String => String): Json => Json = input => transform(input)(f)
 }

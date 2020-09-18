@@ -13,7 +13,8 @@ object Configuration {
 
   final case class Config(ticker: Ticker,
                           radar: Radar,
-                          spin: Spin)
+                          spin: Spin,
+                          prominfo: Prominfo)
 
   final case class Ticker(initialDelay: FiniteDuration,
                           interval: FiniteDuration)
@@ -32,6 +33,14 @@ object Configuration {
                         maxBackoff: FiniteDuration,
                         randomFactor: Double,
                         maxRestarts: Int)
+
+  final case class Prominfo(url: URL,
+                            sections: Set[String],
+                            parallelism: Int,
+                            minBackoff: FiniteDuration,
+                            maxBackoff: FiniteDuration,
+                            randomFactor: Double,
+                            maxRestarts: Int)
 
   final def load: Result[Config] = ConfigSource.default.at("hel").load[Config]
 }
