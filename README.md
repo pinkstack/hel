@@ -17,24 +17,41 @@ Resources
 
 Trenutno stanje
 - [ ] Popolne zapore cest
-  - `GET https://prominfo.projekti.si/web/api/MapService/Query/lay_prometnezaporemol/query?`
-  - `GET https://prominfo.projekti.si/web/api/MapService/Query/lay_prometnidogodkizapore/query?`
-  - `GET https://prominfo.projekti.si/web/api/MapService/Query/lay_popolneZaporeMolPoligoni/query?`
+    - `GET /web/api/MapService/Query/lay_prometnezaporemol/query?`
+    - `GET /web/api/MapService/Query/lay_prometnidogodkizapore/query?`
+    - `GET /web/api/MapService/Query/lay_popolneZaporeMolPoligoni/query?`
 - [ ] Delne zapore cest
-- [ ] Gostota prometa
+    - `GET /web/api/MapService/Query/lay_ostaleZaporeMol/query?`
+    - `GET /web/api/MapService/Query/lay_prometnidogodkidogodki/query?`
+    - `GET /web/api/MapService/Query/lay_delneZaporeMolPoligoni/query?`
 - [ ] Izredni dogodki
+    - `GET /web/api/MapService/Query/lay_prometnidogodkiizredni/query?`
 
 Kolesarjenje
 - [ ] BicikeLJ
-- [ ] Števci kolesarjev
+    - `GET '/web/api/MapService/Query/lay_bicikelj/query?`
 
 Motorni promet
 - [ ] Garažne hiše
+    - `GET '/web/api/MapService/Query/lay_vParkiriscagaraznehise/query?`
+
 - [ ] Parkirišča
+    - `GET '/web/api/MapService/Query/lay_vParkirisca/query?`
+
 - [ ] Parkiraj in prestopi
+    - `GET '/web/api/MapService/Query/lay_vParkiriscapr/query?`
+
 - [ ] Elektro polnilnice
+    - `GET '/web/api/MapService/Query/lay_vPolnilnePostaje2/query?`
+    - `GET '/web/api/MapService/Query/lay_polnilnepostaje_staticne/query?`
+
 - [ ] Car sharing
+    - `GET '/web/api/MapService/Query/lay_vCarsharing/query?`
+
 - [ ] Števci prometa
+    - `GET '/web/api/MapService/Query/lay_drsc_stevna_mesta/query?`
+    - `GET '/web/api/MapService/Query/lay_MikrobitStevnaMesta/query?`
+    - `GET '/web/api/MapService/find?searchText=[ID]&f=json`*
 
 ### Radar
 Resources
@@ -50,6 +67,15 @@ Resources
 
 - [ ] Active events
   - `GET /javno/assets/data/lokacija.json`
+
+
+### Marprom WEBMap
+Resources
+- https://www.marprom.si/webmap/website/webmap.php
+
+### 24ur.com / Ceste
+Resources
+- https://www.24ur.com/novice/ceste
 
 # Authors
 
