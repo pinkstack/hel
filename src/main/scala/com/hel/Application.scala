@@ -1,7 +1,7 @@
 package com.hel
 
 import akka.actor.{ActorSystem, Cancellable}
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, Sink, Source}
+import akka.stream.scaladsl.{Broadcast, Concat, Flow, GraphDSL, Merge, Sink, Source}
 import akka.stream.{FlowShape, Outlet, SystemMaterializer}
 import akka.{Done, NotUsed}
 import cats.data.ReaderT
@@ -42,7 +42,7 @@ object Application extends LazyLogging {
               // json.hcursor.downField("hel_meta").focus.map(_.noSpacesSortKeys).getOrElse("hel_meta not found")
               // json.hcursor.downField("hel_meta").focus.map(_.toString).getOrElse("hel_meta not found")
               // json.hcursor.downField("entity").focus.map(_.toString).getOrElse("x")
-            }
+            }.take(1)
 
           val output = b.add(Broadcast[String](1))
 

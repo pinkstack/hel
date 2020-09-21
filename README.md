@@ -17,6 +17,9 @@ Resources
 
 Trenutno stanje
 - [ ] Popolne zapore cest
+  - `GET https://prominfo.projekti.si/web/api/MapService/Query/lay_prometnezaporemol/query?`
+  - `GET https://prominfo.projekti.si/web/api/MapService/Query/lay_prometnidogodkizapore/query?`
+  - `GET https://prominfo.projekti.si/web/api/MapService/Query/lay_popolneZaporeMolPoligoni/query?`
 - [ ] Delne zapore cest
 - [ ] Gostota prometa
 - [ ] Izredni dogodki
@@ -42,6 +45,9 @@ Resources
   
 
 ### SPIN3
+Resources
+- https://spin3.sos112.si/javno/zemljevid
+
 - [ ] Active events
   - `GET /javno/assets/data/lokacija.json`
 

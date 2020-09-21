@@ -11,6 +11,7 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.scaladsl.{Flow, RestartFlow}
 import cats.data.{Kleisli, OptionT}
 import cats.implicits._
+import com.hel.clients.RadarFlow.{mutateField, nestInto}
 import com.hel.{Configuration, Ticker}
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
@@ -36,11 +37,22 @@ object SpinFlow extends JsonOptics {
       mutateToEpoch("nastanek_cas")(toUTCEpoch),
       nestInto("timestamps", "prijava_cas", "nastanek_cas"),
       mutateField("timestamps") { json =>
-        Json.obj("event_id" -> Json.fromString("spin3::" + hashString(json.toString())))
+        Json.obj("entity_id" -> Json.fromString("spin3::" + hashString(json.toString())))
       },
       mutateField("id") { _ =>
         Json.obj("source" -> Json.fromString("spin3"))
-      }
+      },
+      mutateField("entity_id") { _ =>
+        Json.obj(
+          "source" -> Json.fromString("spin"),
+          "section" -> Json.fromString("spin/event"),
+          "entity" -> Json.fromString("Event"),
+          "categories" -> Json.fromValues(Seq(
+            "location", "event"
+          ).map(Json.fromString))
+        )
+      },
+      nestInto("hel_meta", "entity_id", "source", "section", "entity", "categories"),
     ).reduceLeft(_ andThen _)
 
     _.hcursor.downField("value").focus.map(transformations).flatMap(_.asArray)

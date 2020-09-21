@@ -51,10 +51,10 @@ object RadarFlow extends JsonOptics {
       mutateField("entity_id") { _ =>
         Json.obj(
           "source" -> Json.fromString("radar"),
-          "section" -> Json.fromString("radar/xxx"),
-          "entity" -> Json.fromString("Traffic Counter"),
+          "section" -> Json.fromString("radar/event"),
+          "entity" -> Json.fromString("Event"),
           "categories" -> Json.fromValues(Seq(
-            "location", "counter"
+            "location", "event"
           ).map(Json.fromString))
         )
       },

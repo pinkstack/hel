@@ -287,8 +287,10 @@ object ProminfoFlow extends JsonOptics {
           val output = b.add(Broadcast[Json](1))
 
           // @formatter:off
-          broadcast.out(0) ~> drscStevnaMestaFlow       ~> merge.in(0)
-          broadcast.out(1) ~> mikrobitStevnaMestaFlow   ~> merge.in(1)
+
+          broadcast.out(0) ~> queryFlow(Endpoints.parkiriscaGarazneHise) ~> merge.in(0)
+          broadcast.out(1) ~> drscStevnaMestaFlow       ~> merge.in(1)
+          // broadcast.out(1) ~> mikrobitStevnaMestaFlow   ~> merge.in(1)
 
           merge ~> output
           // @formatter:on
