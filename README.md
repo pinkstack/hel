@@ -8,6 +8,42 @@
 
 - <pre>RADAR_TOKEN</pre> Access Token for Radar Webservice.
 
+## Data sources
+
+### PromInfo
+
+Resources
+- https://prominfo.projekti.si/web/
+
+Trenutno stanje
+- [ ] Popolne zapore cest
+- [ ] Delne zapore cest
+- [ ] Gostota prometa
+- [ ] Izredni dogodki
+
+Kolesarjenje
+- [ ] BicikeLJ
+- [ ] Števci kolesarjev
+
+Motorni promet
+- [ ] Garažne hiše
+- [ ] Parkirišča
+- [ ] Parkiraj in prestopi
+- [ ] Elektro polnilnice
+- [ ] Car sharing
+- [ ] Števci prometa
+
+### Radar
+Resources
+- https://www.amzs.si/aplikacija
+
+- [ ] Active events
+  - `GET /mobile/api/v1/events/active`
+  
+
+### SPIN3
+- [ ] Active events
+  - `GET /javno/assets/data/lokacija.json`
 
 # Authors
 
