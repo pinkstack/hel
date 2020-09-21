@@ -9,8 +9,8 @@ object Main extends App with LazyLogging {
     systemConfig <- ConfigSource.default.config()
   } yield Application.run(appConfig, systemConfig)) match {
     case Left(value) =>
-      System.err.println("💥 " * 10)
-      System.err.println(value.prettyPrint())
+      logger.error("💥 " * 10)
+      logger.error(value.prettyPrint())
     case Right(_) =>
       logger.info("Booted,...")
   }

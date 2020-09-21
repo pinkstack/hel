@@ -56,18 +56,19 @@ object SpinFlow extends JsonOptics {
     } yield events
   }.value
 
-  val fromConfig: Kleisli[Option, (ActorSystem, Configuration.Spin), Flow[Ticker.Tick, Json, NotUsed]] = Kleisli {
-    case (actorSystem: ActorSystem, config: Configuration.Spin) =>
-      RestartFlow.onFailuresWithBackoff(2.seconds, 10.seconds, 0.3, 10) { () =>
+  val fromConfig: Kleisli[Option, (ActorSystem, Configuration.Spin), Flow[Ticker.Tick, Json, NotUsed]] =
+    Kleisli { case (actorSystem: ActorSystem, config: Configuration.Spin) =>
+      RestartFlow.onFailuresWithBackoff(
+        config.minBackoff, config.maxBackoff,
+        config.randomFactor, config.maxRestarts) { () =>
+
         Flow[Ticker.Tick]
           .mapAsyncUnordered(config.parallelism)(_ => fetch(actorSystem, config))
           .collect {
             case Some(value) => value
-            case None =>
-              System.out.println("💥 Bang! 💥")
-              throw new Exception("Data could not be transformed.")
+            case None => throw new Exception("Transformation failed.")
           }.mapConcat(identity)
       }.some
-  }
+    }
 }
 

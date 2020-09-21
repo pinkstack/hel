@@ -4,18 +4,19 @@ import cats._
 import cats.implicits._
 import akka.actor.{ActorSystem, Cancellable}
 import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, Sink, Source}
-import akka.stream.{FlowShape, SystemMaterializer, ThrottleMode}
+import akka.stream.{FlowShape, Outlet, SystemMaterializer, ThrottleMode}
 import akka.{Done, NotUsed}
 import cats.data.ReaderT
-import com.hel.clients.{RadarFlow, SpinFlow, ProminfoFlow}
+import com.hel.clients.{ProminfoFlow, RadarFlow, SpinFlow}
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.LazyLogging
 import io.circe.Json
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 
-object Application {
+object Application extends LazyLogging {
   type Environment = (ActorSystem, Configuration.Config)
   type CollectionFlow = Flow[Ticker.Tick, Json, NotUsed]
   type OutFlow = Flow[Ticker.Tick, String, NotUsed]
@@ -26,12 +27,21 @@ object Application {
         Flow.fromGraph(GraphDSL.create() { implicit b =>
           import GraphDSL.Implicits._
 
-          val broadcast = b.add(Broadcast[Ticker.Tick](1))
-          val merge = b.add(Merge[Json](1))
+          val toggled: (String, Outlet[Ticker.Tick]) => PortOps[Ticker.Tick] = (key, outlet) =>
+            outlet.takeWhile(_ => key match {
+              case "spin" => appConfig.spin.enabled
+              case "radar" => appConfig.radar.enabled
+              case "prominfo" => appConfig.prominfo.enabled
+              case _ => false
+            })
+
+          val broadcast = b.add(Broadcast[Ticker.Tick](3))
+          val merge = b.add(Merge[Json](3))
           val throttle = Flow[Json]
-            .throttle(10, 100.millis, 10, ThrottleMode.Shaping)
+            // .throttle(10, 100.millis, 10, ThrottleMode.Shaping)
             .map { json =>
-              json.toString
+              json.toString()
+              // json.hcursor.downField("hel_meta").focus.map(_.noSpacesSortKeys).getOrElse("hel_meta not found")
               // json.hcursor.downField("hel_meta").focus.map(_.toString).getOrElse("hel_meta not found")
               // json.hcursor.downField("entity").focus.map(_.toString).getOrElse("x")
             }
@@ -39,10 +49,10 @@ object Application {
           val output = b.add(Broadcast[String](1))
 
           // @formatter:off
-          broadcast.out(0) ~> prominfo  ~> merge.in(0)
+          toggled("spin",     broadcast.out(0))   ~> spin     ~> merge.in(0)
+          toggled("radar",    broadcast.out(1))   ~> radar    ~> merge.in(1)
+          toggled("prominfo", broadcast.out(2))   ~> prominfo ~> merge.in(2)
 
-          // broadcast.out(0) ~> spin      ~> merge.in(0)
-          // broadcast.out(1) ~> radar     ~> merge.in(1)
 
           merge.out ~> throttle ~> output
           // @formatter:on
@@ -64,7 +74,7 @@ object Application {
         graph.runWith(Sink.foreach(println))(SystemMaterializer(system).materializer) andThen {
           case Success(_) =>
           case Failure(exception) =>
-            System.err.println(exception)
+            logger.error(exception.getMessage)
             system.terminate()
         }
       }

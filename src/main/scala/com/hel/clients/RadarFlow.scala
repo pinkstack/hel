@@ -41,16 +41,28 @@ object RadarFlow extends JsonOptics {
       ),
       renameField("created", "created_at"),
       mutateField("id") { json =>
-        Json.obj("event_id" -> Json.fromString("radar::" + hashString(json.toString())))
+        Json.obj("entity_id" -> Json.fromString("radar::" + hashString(json.toString())))
       },
       mutateField("id") { _ =>
         Json.obj("source" -> Json.fromString("radar"))
       },
       transformKeys,
-      mutateToEpochs("start_time", "created_at", "updated", "expires", "note_created")(toUTCEpoch)
+      mutateToEpochs("start_time", "created_at", "updated", "expires", "note_created")(toUTCEpoch),
+      mutateField("entity_id") { _ =>
+        Json.obj(
+          "source" -> Json.fromString("radar"),
+          "section" -> Json.fromString("radar/xxx"),
+          "entity" -> Json.fromString("Traffic Counter"),
+          "categories" -> Json.fromValues(Seq(
+            "location", "counter"
+          ).map(Json.fromString))
+        )
+      },
+      nestInto("hel_meta", "entity_id", "source", "section", "entity", "categories"),
+
     ).reduceLeft(_ andThen _)
 
-    _.hcursor.downField("events").focus.map(transformation).flatMap(_.asArray)
+    _.hcursor.downField("events").focus.map[Json](transformation).flatMap(_.asArray)
   }
 
   private[this] def fetch(implicit system: ActorSystem, config: Configuration.Radar): Future[Option[Vector[Json]]] = {
@@ -72,9 +84,7 @@ object RadarFlow extends JsonOptics {
       RestartFlow.onFailuresWithBackoff(config.minBackoff, config.maxBackoff, config.randomFactor, config.maxRestarts) { () =>
         Flow[Ticker.Tick].mapAsyncUnordered(config.parallelism)(_ => fetch(actorSystem, config)).collect {
           case Some(value) => value
-          case _ =>
-            System.out.println("Crash!")
-            throw new Exception("Something else...")
+          case _ => throw new Exception("Parsing has failed.")
         }.mapConcat(identity)
       }.some
   }

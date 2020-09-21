@@ -19,7 +19,8 @@ object Configuration {
   final case class Ticker(initialDelay: FiniteDuration,
                           interval: FiniteDuration)
 
-  final case class Radar(url: URL,
+  final case class Radar(enabled: Boolean,
+                         url: URL,
                          token: String,
                          parallelism: Int,
                          minBackoff: FiniteDuration,
@@ -27,14 +28,16 @@ object Configuration {
                          randomFactor: Double,
                          maxRestarts: Int)
 
-  final case class Spin(url: URL,
+  final case class Spin(enabled: Boolean,
+                        url: URL,
                         parallelism: Int,
                         minBackoff: FiniteDuration,
                         maxBackoff: FiniteDuration,
                         randomFactor: Double,
                         maxRestarts: Int)
 
-  final case class Prominfo(url: URL,
+  final case class Prominfo(enabled: Boolean,
+                            url: URL,
                             sections: Set[String],
                             parallelism: Int,
                             minBackoff: FiniteDuration,
