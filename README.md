@@ -32,8 +32,14 @@ Motorni promet
 - [ ] Car sharing
 - [ ] Števci prometa
 
-### 
+### Radar
+- [ ] Active events
+  - `GET /mobile/api/v1/events/active`
+  
 
+### SPIN3
+- [ ] Active events
+  - `GET /javno/assets/data/lokacija.json`
 
 # Authors
 
