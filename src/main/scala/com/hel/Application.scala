@@ -1,19 +1,17 @@
 package com.hel
 
-import cats._
-import cats.implicits._
 import akka.actor.{ActorSystem, Cancellable}
 import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, Sink, Source}
-import akka.stream.{FlowShape, Outlet, SystemMaterializer, ThrottleMode}
+import akka.stream.{FlowShape, Outlet, SystemMaterializer}
 import akka.{Done, NotUsed}
 import cats.data.ReaderT
+import cats.implicits._
 import com.hel.clients.{ProminfoFlow, RadarFlow, SpinFlow}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import io.circe.Json
 
 import scala.concurrent.Future
-import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 
 object Application extends LazyLogging {
