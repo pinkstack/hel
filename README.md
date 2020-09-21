@@ -12,7 +12,8 @@
 
 ### PromInfo
 
-Source: https://prominfo.projekti.si/web/
+Resources
+- https://prominfo.projekti.si/web/
 
 Trenutno stanje
 - [ ] Popolne zapore cest
@@ -33,6 +34,9 @@ Motorni promet
 - [ ] Števci prometa
 
 ### Radar
+Resources
+- https://www.amzs.si/aplikacija
+
 - [ ] Active events
   - `GET /mobile/api/v1/events/active`
   
