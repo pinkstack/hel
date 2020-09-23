@@ -45,6 +45,7 @@ object Configuration {
                             maxBackoff: FiniteDuration,
                             randomFactor: Double,
                             maxRestarts: Int,
+                            defaultQueryAttributes: Map[String,String],
                             sections: Map[String, Section])
 
   final case class Layer(name: String, enabled: Boolean)

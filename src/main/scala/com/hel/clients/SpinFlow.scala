@@ -11,7 +11,6 @@ import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.scaladsl.{Flow, RestartFlow}
 import cats.data.{Kleisli, OptionT}
 import cats.implicits._
-import com.hel.clients.RadarFlow.{mutateField, nestInto}
 import com.hel.{Configuration, Ticker}
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 

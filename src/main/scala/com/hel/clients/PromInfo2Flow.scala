@@ -14,17 +14,13 @@ import akka.stream.{FlowShape, ThrottleMode}
 import akka.stream.scaladsl._
 import akka.actor.ActorSystem
 import cats.data.Kleisli
-import com.hel.clients.Endpoints.Transformation
-import com.hel.clients.PromInfoFlow.{nestInto, removeFields, renameField, transformKeysWith, unnestObject}
 import com.hel.{Configuration, Ticker}
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import io.circe.Json
-import shapeless._
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-object Endpoints {
+object Endpoints extends JsonOptics {
   type SectionName = String
   type LayerName = String
   type Enabled = Boolean
@@ -32,59 +28,70 @@ object Endpoints {
   type Layer = (LayerName, HttpRequest, Transformation)
   type Section = (SectionName, List[Layer], Enabled)
 
-  // case class Call(request: HttpRequest, transformation: Option[Json => Json] = None, calls: Call)
-
-  final case class Call(request: HttpRequest)
-
-  val defaultQueryTransformation: Transformation = { json =>
-    val transformation = Seq(
+  private[this] val defaultQueryTransformation: Transformation = {
+    val transformations: Json => Json = Seq(
       unnestObject("geometry"),
       unnestObject("attributes"),
       renameField("geometry_y", "lon"),
       renameField("geometry_x", "lat"),
       nestInto("location", "lon", "lat"),
       transformKeysWith(_.toLowerCase),
-    ).reduceLeft(_ andThen _)
+      transformKeysWith(_.replaceFirst("attributes_", "")),
+      removeFields("geometry", "lon", "lat", "attributes"),
+    ).reduceLeft((a, b) => a andThen b)
 
-    json.hcursor.downField("results").focus.map(transformation)
-      .flatMap(_.asArray)
+    _.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
   }
 
-  val defaultQueryAttributes: Map[String, String] = Map(
-    "returnGeometry" -> "true",
-    "where" -> "1=1",
-    "outSr" -> "4326",
-    "outFields" -> "*",
-    "inSr" -> "4326",
-    "geometry" -> """{"xmin":14.0321,"ymin":45.7881,"xmax":14.8499,"ymax":46.218,"spatialReference":{"wkid":4326}}""",
-    "geometryType" -> "esriGeometryEnvelope",
-    "spatialRel" -> "esriSpatialRelContains",
-    "f" -> "json"
-  )
+  private[this] def defineSection(sectionName: SectionName)
+                                 (layers: Layer*)
+                                 (implicit config: Configuration.Prominfo): Section = {
 
-
-  private[this] def section(name: SectionName)
-                           (layers: (LayerName, HttpRequest, Transformation)*)
-                           (implicit config: Configuration.Prominfo): Section = {
-
-    val sectionOpt: Option[Configuration.Section] = config.sections.get(name)
+    val sectionOpt: Option[Configuration.Section] = config.sections.get(sectionName)
     val layersConfiguration: List[Configuration.Layer] =
       sectionOpt.map(section => section.layers.filter(_.enabled)).getOrElse(List.empty[Configuration.Layer])
 
+    val sectionTransformations: Option[Vector[Json]] => Option[Vector[Json]] = { jsons =>
+      def t: Json => Json = { element =>
+        val ids: Json =
+          element.hcursor.downField("id").focus
+            .map { json =>
+              val entityID = List("prominfo", sectionName, json.toString).mkString("::")
+                .replaceAll("""\"""", "")
+              Json.obj(
+                ("hel_entity_id", Json.fromString(entityID)),
+                ("hel_entity_hash_id", Json.fromString(hashString(entityID))))
+            }.getOrElse {
+            throw new Exception("""Missing "id" field in the original JSON payload""")
+          }
+
+        element.deepMerge(Json.obj(("hel_meta", Json.obj(
+          ("section_name", Json.fromString(sectionName)),
+        ).deepMerge(ids)))).deepMerge(ids)
+      }
+
+      jsons.map(_.map(t))
+    }
+
     (
-      name,
-      layers.toList.filter(layer => layersConfiguration.map(_.name).contains(layer._1)),
+      sectionName,
+      layers.toList.filter(layer => layersConfiguration.map(_.name).contains(layer._1)).map { layer: Layer =>
+        layer.copy(_3 = layer._3.andThen(sectionTransformations))
+      },
       sectionOpt.exists(_.enabled)
     )
   }
 
-  private[this] def queryLayer(name: LayerName,
-                               queryAttributes: Map[String, String] = defaultQueryAttributes)
+  private[this] def queryLayer(layerName: LayerName,
+                               queryAttributes: Map[String, String] = Map.empty)
                               (implicit config: Configuration.Prominfo,
-                               transformation: Transformation = defaultQueryTransformation): (LayerName, HttpRequest, Transformation) = {
+                               transformation: Transformation = defaultQueryTransformation): Layer = {
+    val attributes: Map[String, String] = Option.when(queryAttributes.isEmpty)(config.defaultQueryAttributes).getOrElse(queryAttributes)
+
     (
-      name,
-      HttpRequest(uri = Uri(s"${config.url}/web/api/MapService/Query/$name/query").withQuery(Uri.Query(queryAttributes))),
+      layerName,
+      HttpRequest(uri = Uri(s"${config.url}/web/api/MapService/Query/$layerName/query")
+        .withQuery(Uri.Query(attributes))),
       transformation
     )
   }
@@ -105,204 +112,24 @@ object Endpoints {
       json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
     }
 
-    section("trenutno-stanje")(
+
+    defineSection("trenutno-stanje")(
       queryLayer("lay_prometnezaporemol")(config, transformation),
       queryLayer("lay_prometnidogodkizapore")(config, transformation),
-      queryLayer("lay_popolneZaporeMolPoligoni")(config, transformation))
-  }
-
-  val delneZaporeCest: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("delne-zapore-cest")(
-      queryLayer("lay_ostaleZaporeMol")(config, transformation),
-      queryLayer("lay_prometnidogodkidogodki")(config, transformation),
-      queryLayer("lay_delneZaporeMolPoligoni")(config, transformation)
+      queryLayer("lay_popolneZaporeMolPoligoni")(config, transformation)
     )
   }
 
-  val izredniDogodki: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
+  private[this] val sections: Configuration.Prominfo => Map[String, Section] = { implicit config =>
+    config.sections.map { case (sectionName: SectionName, sectionConfig: Configuration.Section) =>
+      (sectionName, defineSection(sectionName)(
+        sectionConfig.layers.map(layerConfig => queryLayer(layerConfig.name)(config)): _*
+      ))
     }
-
-    section("izredni-dogodki")(
-      queryLayer("lay_prometnidogodkiizredni")(config, transformation)
-    )
   }
 
-  val bicikelj: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("bicikelj")(
-      queryLayer("lay_bicikelj")(config, transformation)
-    )
-  }
-
-  val garazneHise: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("garazne-hise")(
-      queryLayer("lay_vParkiriscagaraznehise")(config, transformation)
-    )
-  }
-
-  val parkirisca: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("parkirisca")(
-      queryLayer("lay_vParkirisca")(config, transformation)
-    )
-  }
-
-  val parkirajPrestopi: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("parkiraj-prestopi")(
-      queryLayer("lay_vParkiriscapr")(config, transformation)
-    )
-  }
-
-  val elektroPolnilnice: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("elektro-polnilnice")(
-      queryLayer("lay_vPolnilnePostaje2")(config, transformation),
-      queryLayer("lay_polnilnepostaje_staticne")(config, transformation)
-    )
-  }
-
-  val carSharing: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("car-sharing")(
-      queryLayer("lay_vCarsharing")(config, transformation),
-    )
-  }
-
-  val stevciPrometa: Configuration.Prominfo => Section = { implicit config =>
-    val transformation: Transformation = { json =>
-      val transformations: Json => Json = Seq(
-        unnestObject("geometry"),
-        unnestObject("attributes"),
-        renameField("geometry_y", "lon"),
-        renameField("geometry_x", "lat"),
-        nestInto("location", "lon", "lat"),
-        transformKeysWith(_.toLowerCase),
-        transformKeysWith(_.replaceFirst("attributes_", "")),
-        removeFields("geometry", "lon", "lat", "attributes"),
-      ).reduceLeft((a, b) => a andThen b)
-
-      json.hcursor.downField("features").focus.map(transformations).flatMap(_.asArray)
-    }
-
-    section("stevci-prometa")(
-      queryLayer("lay_drsc_stevna_mesta")(config, transformation),
-      queryLayer("lay_MikrobitStevnaMesta")(config, transformation),
-    )
-  }
+  def section(name: SectionName)(implicit config: Configuration.Prominfo): Section =
+    sections(config).getOrElse(name, throw new Exception(s"Unknown section $name"))
 }
 
 object PromInfo2Flow {
@@ -312,24 +139,26 @@ object PromInfo2Flow {
       .filter(_ => section._3)
       .flatMapConcat { _ => Source(section._2) }
 
-  def query: ActorSystem => Flow[(String, HttpRequest, Transformation), Json, NotUsed] = {
+  def query: ActorSystem => Flow[Endpoints.Layer, Json, NotUsed] = {
     implicit system: ActorSystem =>
       import system.dispatcher
       import FailFastCirceSupport._
       import io.circe._
 
-      val fetch: ((String, HttpRequest, Transformation)) => Future[Option[Vector[Json]]] = {
-        case (_, request, transformation) =>
+      val fetch: Endpoints.Layer => Future[(Endpoints.LayerName, Option[Vector[Json]])] = {
+        case (layer, request, transformation) =>
           Http().singleRequest(request)
             .flatMap(r => Unmarshal(r).to[Json])
             .map(transformation)
+            .map(r => (layer, r))
       }
 
-      Flow[(String, HttpRequest, Transformation)]
+      Flow[Endpoints.Layer]
         .mapAsyncUnordered(1)(fetch)
         .collect {
-          case Some(v) => v
-          case None => throw new Exception(s"ooops")
+          case (_, Some(v)) => v
+          case (layer: String, None) =>
+            throw new Exception(s"Failed retrieval of layer: ${layer}")
         }
         .mapConcat(identity)
   }
@@ -339,8 +168,6 @@ object PromInfo2Flow {
       implicit val system: ActorSystem = actorSystem
       implicit val config: Configuration.Prominfo = prominfoConfig
 
-      println(config)
-
       RestartFlow.onFailuresWithBackoff(config.minBackoff, config.maxBackoff, config.randomFactor, config.maxRestarts) {
         () =>
           Flow.fromGraph(GraphDSL.create() { implicit b =>
@@ -348,25 +175,31 @@ object PromInfo2Flow {
 
             val broadcast = b.add(Broadcast[Ticker.Tick](10))
 
-            val merge = b.add(Merge[(String, HttpRequest, Transformation)](10))
+            val merge = b.add(Merge[Endpoints.Layer](10))
 
-            val throttle = Flow[(String, HttpRequest, Transformation)]
+            val throttle = Flow[Endpoints.Layer]
               .throttle(10, 200.millis, 10, ThrottleMode.Shaping)
 
             val output = b.add(Broadcast[Json](1))
 
-            // @formatter:off
-            broadcast.out(0) ~> processSection(Endpoints.trenutnoStanje(config))    ~> merge.in(0)
-            broadcast.out(1) ~> processSection(Endpoints.delneZaporeCest(config))   ~> merge.in(1)
-            broadcast.out(2) ~> processSection(Endpoints.izredniDogodki(config))    ~> merge.in(2)
-            broadcast.out(3) ~> processSection(Endpoints.bicikelj(config))          ~> merge.in(3)
-            broadcast.out(4) ~> processSection(Endpoints.garazneHise(config))       ~> merge.in(4)
-            broadcast.out(5) ~> processSection(Endpoints.parkirisca(config))        ~> merge.in(5)
-            broadcast.out(6) ~> processSection(Endpoints.parkirajPrestopi(config))  ~> merge.in(6)
-            broadcast.out(7) ~> processSection(Endpoints.elektroPolnilnice(config)) ~> merge.in(7)
-            broadcast.out(8) ~> processSection(Endpoints.carSharing(config))        ~> merge.in(8)
-            broadcast.out(9) ~> processSection(Endpoints.stevciPrometa(config))     ~> merge.in(9)
+            /**
+             * "dat_dov" : 1598572800000, / 1000 = 28. 08. 2020
+             */
 
+            // @formatter:off
+            // broadcast.out(0) ~> processSection(Endpoints.trenutnoStanje(config))               ~> merge.in(0)
+            broadcast.out(0) ~> processSection(Endpoints.section("trenutno-stanje"))    ~> merge.in(0)
+
+            broadcast.out(1) ~> processSection(Endpoints.section("delne-zapore-cest"))  ~> merge.in(1)
+            broadcast.out(2) ~> processSection(Endpoints.section("izredni-dogodki"))    ~> merge.in(2)
+            broadcast.out(3) ~> processSection(Endpoints.section("bicikelj"))           ~> merge.in(3)
+            broadcast.out(4) ~> processSection(Endpoints.section("garazne-hise"))       ~> merge.in(4)
+            broadcast.out(5) ~> processSection(Endpoints.section("parkirisca"))         ~> merge.in(5)
+            broadcast.out(6) ~> processSection(Endpoints.section("parkiraj-prestopi"))  ~> merge.in(6)
+            broadcast.out(7) ~> processSection(Endpoints.section("elektro-polnilnice")) ~> merge.in(7)
+            broadcast.out(8) ~> processSection(Endpoints.section("car-sharing"))        ~> merge.in(8)
+            broadcast.out(9) ~> processSection(Endpoints.section("stevci-prometa"))     ~> merge.in(9)
+            
             merge.out ~> throttle ~> query(system) ~> output.in
             // @formatter:on
 

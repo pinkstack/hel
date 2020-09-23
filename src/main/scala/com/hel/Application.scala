@@ -39,8 +39,10 @@ object Application extends LazyLogging {
             // .throttle(10, 100.millis, 10, ThrottleMode.Shaping)
             .map { json =>
               // json.toString()
+              json.hcursor.downField("hel_entity_id").focus.map(_.noSpacesSortKeys)
+                .getOrElse(throw new Exception("hel_entity_id is missing!"))
 
-              json.noSpaces
+              // json.noSpaces
               // json.hcursor.downField("hel_meta").focus.map(_.noSpacesSortKeys).getOrElse("hel_meta not found")
               // json.hcursor.downField("hel_meta").focus.map(_.toString).getOrElse("hel_meta not found")
               // json.hcursor.downField("entity").focus.map(_.toString).getOrElse("x")
