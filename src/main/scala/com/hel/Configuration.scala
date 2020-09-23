@@ -1,6 +1,7 @@
 package com.hel
 
 import java.net.URL
+import java.util
 
 import pureconfig.ConfigReader.Result
 import pureconfig.ConfigSource
@@ -36,14 +37,19 @@ object Configuration {
                         randomFactor: Double,
                         maxRestarts: Int)
 
+
   final case class Prominfo(enabled: Boolean,
                             url: URL,
-                            sections: Set[String],
                             parallelism: Int,
                             minBackoff: FiniteDuration,
                             maxBackoff: FiniteDuration,
                             randomFactor: Double,
-                            maxRestarts: Int)
+                            maxRestarts: Int,
+                            sections: Map[String, Section])
+
+  final case class Layer(name: String, enabled: Boolean)
+
+  final case class Section(enabled: Boolean, layers: List[Layer])
 
   final def load: Result[Config] = ConfigSource.default.at("hel").load[Config]
 }

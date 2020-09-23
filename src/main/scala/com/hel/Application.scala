@@ -6,7 +6,7 @@ import akka.stream.{FlowShape, Outlet, SystemMaterializer}
 import akka.{Done, NotUsed}
 import cats.data.ReaderT
 import cats.implicits._
-import com.hel.clients.{ProminfoFlow, RadarFlow, SpinFlow}
+import com.hel.clients.{PromInfo2Flow, PromInfoFlow, RadarFlow, SpinFlow}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import io.circe.Json
@@ -38,11 +38,14 @@ object Application extends LazyLogging {
           val throttle = Flow[Json]
             // .throttle(10, 100.millis, 10, ThrottleMode.Shaping)
             .map { json =>
-              json.toString()
+              // json.toString()
+
+              json.noSpaces
               // json.hcursor.downField("hel_meta").focus.map(_.noSpacesSortKeys).getOrElse("hel_meta not found")
               // json.hcursor.downField("hel_meta").focus.map(_.toString).getOrElse("hel_meta not found")
               // json.hcursor.downField("entity").focus.map(_.toString).getOrElse("x")
-            }.take(1)
+            }
+          // .take(1)
 
           val output = b.add(Broadcast[String](1))
 
@@ -50,7 +53,6 @@ object Application extends LazyLogging {
           toggled("spin",     broadcast.out(0))   ~> spin     ~> merge.in(0)
           toggled("radar",    broadcast.out(1))   ~> radar    ~> merge.in(1)
           toggled("prominfo", broadcast.out(2))   ~> prominfo ~> merge.in(2)
-
 
           merge.out ~> throttle ~> output
           // @formatter:on
@@ -62,7 +64,8 @@ object Application extends LazyLogging {
       ticker <- Ticker.fromConfig.local[Environment](_._2.ticker)
       spin <- SpinFlow.fromConfig.local[Environment](c => (c._1, c._2.spin))
       radar <- RadarFlow.fromConfig.local[Environment](c => (c._1, c._2.radar))
-      prominfo <- ProminfoFlow.fromConfig.local[Environment](c => (c._1, c._2.prominfo))
+      // prominfo <- PromInfoFlow.fromConfig.local[Environment](c => (c._1, c._2.prominfo))
+      prominfo <- PromInfo2Flow.fromConfig.local[Environment](c => (c._1, c._2.prominfo))
     } yield ticker.via(tickToCollection(spin, radar, prominfo))
 
     ActorSystem("hel", systemConfig).some.map { system =>

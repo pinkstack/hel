@@ -14,6 +14,9 @@ libraryDependencies ++= Seq(
   "org.typelevel" %% "cats-core" % "2.0.0",
   "org.typelevel" %% "cats-effect" % "2.1.4",
 
+  // Shapeless
+  "com.chuusai" %% "shapeless" % "2.3.3",
+
   // Decline
   "com.monovore" %% "decline" % "1.3.0",
 
@@ -42,7 +45,10 @@ libraryDependencies ++= Seq(
   "com.github.julien-truffaut" %% "monocle-macro" % "2.0.3",
 )
 
-resolvers += Resolver.sonatypeRepo("snapshots")
+resolvers ++= Seq(
+  Resolver.sonatypeRepo("releases"),
+  Resolver.sonatypeRepo("snapshots")
+)
 
 scalacOptions ++= Seq(
   "-feature",

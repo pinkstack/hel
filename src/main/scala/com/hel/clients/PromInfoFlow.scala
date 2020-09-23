@@ -1,16 +1,12 @@
 package com.hel.clients
 
-import java.time.format.DateTimeFormatter
-import java.time.{LocalDateTime, ZoneId}
-
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{HttpRequest, Uri}
-import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.FlowShape
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, RestartFlow, Source}
+import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, RestartFlow}
 import cats.data.{Kleisli, OptionT}
 import cats.implicits._
 import com.hel.{Configuration, Ticker}
@@ -19,12 +15,33 @@ import io.circe.Json
 
 import scala.concurrent.Future
 
-object ProminfoFlow extends JsonOptics {
+object PromInfoFlow extends JsonOptics {
   type Transformation = Json => Json
   type Transformer = (String, Transformation)
 
   import FailFastCirceSupport._
   import io.circe._
+
+  val defaultQueryAttributes: Map[String, String] = Map(
+    "returnGeometry" -> "true",
+    "where" -> "1=1",
+    "outSr" -> "4326",
+    "outFields" -> "*",
+    "inSr" -> "4326",
+    "geometry" -> """{"xmin":14.0321,"ymin":45.7881,"xmax":14.8499,"ymax":46.218,"spatialReference":{"wkid":4326}}""",
+    "geometryType" -> "esriGeometryEnvelope",
+    "spatialRel" -> "esriSpatialRelContains",
+    "f" -> "json"
+  )
+
+  val defaultFindAttributes: Map[String, String] = Map(
+    "sr" -> "4326",
+    "contains" -> "true",
+    "returnGeometry" -> "true",
+    "returnZ" -> "true",
+    "returnM" -> "false",
+    "f" -> "json"
+  )
 
   private def defaultQueryTransformation(f: Transformation): Json => Option[Vector[Json]] = {
     val transform: Json => Json = Seq(
@@ -61,102 +78,6 @@ object ProminfoFlow extends JsonOptics {
     implicit system: ActorSystem, config: Configuration.Prominfo): Future[Option[Vector[Json]]] = {
     requestTransformWith(uri)(f)(identity)
   }
-
-  object Endpoints {
-    private def define(name: String)(transformations: Transformation*): Transformer =
-      (name, transformations.reduceLeft(_ andThen _))
-
-    def parkiriscaGarazneHise: Transformer = define("lay_vParkiriscagaraznehise")(
-      mutateField("attributes_naziv") { json =>
-        Json.obj("entity_id" -> Json.fromString("prominfo::" + hashString(json.toString())))
-      },
-      mutateField("entity_id") { _ =>
-        Json.obj(
-          "source" -> Json.fromString("prominfo"),
-          "section" -> Json.fromString("lay_vParkiriscagaraznehise"),
-          "entity" -> Json.fromString("Parking garage"),
-          "categories" -> Json.fromValues(Seq(
-            "location", "counter"
-          ).map(Json.fromString))
-        )
-      },
-      nestInto("hel_meta", "entity_id", "source", "section", "entity", "categories")
-    )
-
-    def drscStevnaMesta: Transformer = define("lay_drsc_stevna_mesta")(
-      mutateField("attributes_road_name") { json =>
-        Json.obj("entity_id" -> Json.fromString("prominfo::" + hashString(json.toString())))
-      },
-      mutateField("entity_id") { _ =>
-        Json.obj(
-          "source" -> Json.fromString("prominfo"),
-          "section" -> Json.fromString("lay_drsc_stevna_mesta"),
-          "entity" -> Json.fromString("Traffic Counter"),
-          "categories" -> Json.fromValues(Seq(
-            "location", "counter"
-          ).map(Json.fromString))
-        )
-      },
-      nestInto("hel_meta", "entity_id", "source", "section", "entity", "categories")
-    )
-
-    def mikrobitStevnaMesta: Transformer = define("lay_MikrobitStevnaMesta")(
-      mutateField("attributes_road_name") { json =>
-        Json.obj("entity_id" -> Json.fromString("prominfo::" + hashString(json.toString())))
-      },
-      mutateField("entity_id") { _ =>
-        Json.obj(
-          "source" -> Json.fromString("prominfo"),
-          "section" -> Json.fromString("lay_MikrobitStevnaMesta"),
-          "entity" -> Json.fromString("Traffic Counter"),
-          //"categories" -> Json.fromValues(Seq(
-          //  "location", "counter"
-          //).map(Json.fromString))
-        )
-      },
-      nestInto("hel_meta", "entity_id", "source", "section", "entity")
-    )
-
-    def carsharing: Transformer = define("lay_vCarsharing")(
-      mutateField("attributes_id") { json =>
-        Json.obj("entity_id" -> Json.fromString("prominfo::" + hashString(json.toString())))
-      },
-      mutateField("entity_id") { _ =>
-        Json.obj(
-          "source" -> Json.fromString("prominfo"),
-          "section" -> Json.fromString("lay_vCarsharing"),
-          "entity" -> Json.fromString("Car-sharing Spot"),
-          //"categories" -> Json.fromValues(Seq(
-          //  "location", "counter"
-          //).map(Json.fromString))
-        )
-      },
-      nestInto("hel_meta", "entity_id", "source", "section", "entity")
-    )
-
-    val endpoints = Seq(parkiriscaGarazneHise, drscStevnaMesta, mikrobitStevnaMesta, carsharing)
-  }
-
-  val defaultQueryAttributes: Map[String, String] = Map(
-    "returnGeometry" -> "true",
-    "where" -> "1=1",
-    "outSr" -> "4326",
-    "outFields" -> "*",
-    "inSr" -> "4326",
-    "geometry" -> """{"xmin":14.0321,"ymin":45.7881,"xmax":14.8499,"ymax":46.218,"spatialReference":{"wkid":4326}}""",
-    "geometryType" -> "esriGeometryEnvelope",
-    "spatialRel" -> "esriSpatialRelContains",
-    "f" -> "json"
-  )
-
-  val defaultFindAttributes: Map[String, String] = Map(
-    "sr" -> "4326",
-    "contains" -> "true",
-    "returnGeometry" -> "true",
-    "returnZ" -> "true",
-    "returnM" -> "false",
-    "f" -> "json"
-  )
 
   def queryFlow(transformer: Transformer)(implicit actorSystem: ActorSystem, config: Configuration.Prominfo): Flow[Ticker.Tick, Json, NotUsed] = {
     val uri: Uri = Uri(s"${config.url}/web/api/MapService/Query/${transformer._1}/query")
@@ -208,7 +129,7 @@ object ProminfoFlow extends JsonOptics {
       }
     }
 
-    queryFlow(Endpoints.drscStevnaMesta)
+    queryFlow(PromInfoEndpoints.drscStevnaMesta)
       .map(_.hcursor.downField("attributes_id").as[String].toOption)
       .collect {
         case Some(attributeID) => attributeID
@@ -259,7 +180,7 @@ object ProminfoFlow extends JsonOptics {
       }
     }
 
-    queryFlow(Endpoints.mikrobitStevnaMesta)
+    queryFlow(PromInfoEndpoints.mikrobitStevnaMesta)
       .map(_.hcursor.downField("attributes_id").as[String].toOption)
       .collect {
         case Some(attributeID) => attributeID
@@ -288,7 +209,7 @@ object ProminfoFlow extends JsonOptics {
 
           // @formatter:off
 
-          broadcast.out(0) ~> queryFlow(Endpoints.parkiriscaGarazneHise) ~> merge.in(0)
+          broadcast.out(0) ~> queryFlow(PromInfoEndpoints.parkiriscaGarazneHise) ~> merge.in(0)
           broadcast.out(1) ~> drscStevnaMestaFlow       ~> merge.in(1)
           // broadcast.out(1) ~> mikrobitStevnaMestaFlow   ~> merge.in(1)
 
