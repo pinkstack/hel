@@ -6,7 +6,7 @@ import akka.stream.{FlowShape, Outlet, SystemMaterializer}
 import akka.{Done, NotUsed}
 import cats.data.ReaderT
 import cats.implicits._
-import com.hel.clients.{PromInfo2Flow, PromInfoFlow, RadarFlow, SpinFlow}
+import com.hel.clients.{PromInfoFlow, RadarFlow, SpinFlow}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import io.circe.Json
@@ -39,9 +39,9 @@ object Application extends LazyLogging {
             // .throttle(10, 100.millis, 10, ThrottleMode.Shaping)
             .map { json =>
               // json.toString()
-              json.hcursor.downField("hel_entity_id").focus.map(_.noSpacesSortKeys)
-                .getOrElse(throw new Exception("hel_entity_id is missing!"))
-
+              //json.hcursor.downField("hel_entity_id").focus // .map(_.noSpacesSortKeys)
+              //  .getOrElse(throw new Exception("hel_entity_id is missing!"))
+              json.hcursor.downField("hel_entity_id").focus.map(_.noSpacesSortKeys).getOrElse("NO hel_entity_id")
               // json.noSpaces
               // json.hcursor.downField("hel_meta").focus.map(_.noSpacesSortKeys).getOrElse("hel_meta not found")
               // json.hcursor.downField("hel_meta").focus.map(_.toString).getOrElse("hel_meta not found")
@@ -67,7 +67,7 @@ object Application extends LazyLogging {
       spin <- SpinFlow.fromConfig.local[Environment](c => (c._1, c._2.spin))
       radar <- RadarFlow.fromConfig.local[Environment](c => (c._1, c._2.radar))
       // prominfo <- PromInfoFlow.fromConfig.local[Environment](c => (c._1, c._2.prominfo))
-      prominfo <- PromInfo2Flow.fromConfig.local[Environment](c => (c._1, c._2.prominfo))
+      prominfo <- PromInfoFlow.fromConfig.local[Environment](c => (c._1, c._2.prominfo))
     } yield ticker.via(tickToCollection(spin, radar, prominfo))
 
     ActorSystem("hel", systemConfig).some.map { system =>

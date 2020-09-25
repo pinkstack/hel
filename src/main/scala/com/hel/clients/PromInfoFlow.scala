@@ -5,219 +5,148 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{HttpRequest, Uri}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.stream.FlowShape
-import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL, Merge, RestartFlow}
-import cats.data.{Kleisli, OptionT}
+import akka.stream.scaladsl._
+import akka.stream.{FlowShape, ThrottleMode}
+import cats.data.Kleisli
 import cats.implicits._
 import com.hel.{Configuration, Ticker}
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import io.circe.Json
+import io.circe.optics.JsonPath.root
 
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 object PromInfoFlow extends JsonOptics {
-  type Transformation = Json => Json
-  type Transformer = (String, Transformation)
 
-  import FailFastCirceSupport._
-  import io.circe._
+  def process(section: PromInfoEndpoints.Section): Flow[Ticker.Tick, PromInfoEndpoints.Layer, NotUsed] =
+    Flow[Ticker.Tick]
+      .filter(_ => section._3)
+      .flatMapConcat { _ => Source(section._2) }
 
-  val defaultQueryAttributes: Map[String, String] = Map(
-    "returnGeometry" -> "true",
-    "where" -> "1=1",
-    "outSr" -> "4326",
-    "outFields" -> "*",
-    "inSr" -> "4326",
-    "geometry" -> """{"xmin":14.0321,"ymin":45.7881,"xmax":14.8499,"ymax":46.218,"spatialReference":{"wkid":4326}}""",
-    "geometryType" -> "esriGeometryEnvelope",
-    "spatialRel" -> "esriSpatialRelContains",
-    "f" -> "json"
-  )
+  def query: ActorSystem => Flow[PromInfoEndpoints.Layer, (String, String, Json), NotUsed] = {
+    implicit system: ActorSystem =>
+      import FailFastCirceSupport._
+      import io.circe._
+      import system.dispatcher
 
-  val defaultFindAttributes: Map[String, String] = Map(
-    "sr" -> "4326",
-    "contains" -> "true",
-    "returnGeometry" -> "true",
-    "returnZ" -> "true",
-    "returnM" -> "false",
-    "f" -> "json"
-  )
+      val fetch: PromInfoEndpoints.Layer => Future[(PromInfoEndpoints.SectionName, PromInfoEndpoints.LayerName, Option[Vector[Json]])] = {
+        case (sectionName, layerName, request, transformation) =>
+          Http().singleRequest(request)
+            .flatMap(r => Unmarshal(r).to[Json])
+            .map(transformation)
+            .map(r => (sectionName, layerName, r))
+      }
 
-  private def defaultQueryTransformation(f: Transformation): Json => Option[Vector[Json]] = {
-    val transform: Json => Json = Seq(
-      unnestObject("geometry"),
-      unnestObject("attributes"),
-      renameField("geometry_y", "lon"),
-      renameField("geometry_x", "lat"),
-      nestInto("location", "lon", "lat"),
-      removeFields("geometry", "lon", "lat", "attributes"),
-      transformKeysWith(_.toLowerCase)
-    ).reduceLeft(_ andThen _)
-
-    _.hcursor.downField("features").focus.map(transform andThen f).flatMap(_.asArray)
+      Flow[PromInfoEndpoints.Layer]
+        .mapAsyncUnordered(2)(fetch)
+        .collect {
+          case (sectionName, layerName, Some(jsons)) =>
+            jsons.map { json => (sectionName, layerName, json) }
+          case (sectionName, layerName, None) =>
+            throw new Exception(s"Failed retrieval in $sectionName / $layerName")
+        }
+        .mapConcat(identity)
   }
 
-  private[this] def requestTransformWith(uri: Uri)(k: Transformation => Json => Option[Vector[Json]])(f: Transformation)
-                                        (implicit system: ActorSystem, config: Configuration.Prominfo): Future[Option[Vector[Json]]] = {
+
+  def fetchCounters(implicit system: ActorSystem, config: Configuration.Prominfo): Flow[(PromInfoEndpoints.LayerName, PromInfoEndpoints.SectionName, Json), Json, NotUsed] = {
+    import FailFastCirceSupport._
+    import io.circe._
     import system.dispatcher
 
-    for {
-      request <- OptionT.fromOption[Future](HttpRequest(uri = uri).some)
-      r <- OptionT.liftF(Http().singleRequest(request).filter(_.status.isSuccess()))
-      json <- OptionT.liftF(Unmarshal(r).to[Json])
-      events <- OptionT.fromOption[Future](k(f)(json))
-    } yield events
-  }.value
-
-  private[this] def requestWithDefaultTransform(uri: Uri)(f: Transformation)(
-    implicit system: ActorSystem, config: Configuration.Prominfo): Future[Option[Vector[Json]]] = {
-    requestTransformWith(uri)(defaultQueryTransformation)(f)
-  }
-
-  private[this] def requestTransform(uri: Uri)(f: Transformation => Json => Option[Vector[Json]])(
-    implicit system: ActorSystem, config: Configuration.Prominfo): Future[Option[Vector[Json]]] = {
-    requestTransformWith(uri)(f)(identity)
-  }
-
-  def queryFlow(transformer: Transformer)(implicit actorSystem: ActorSystem, config: Configuration.Prominfo): Flow[Ticker.Tick, Json, NotUsed] = {
-    val uri: Uri = Uri(s"${config.url}/web/api/MapService/Query/${transformer._1}/query")
-      .withQuery(Uri.Query(defaultQueryAttributes))
-
-    Flow[Ticker.Tick]
-      .mapAsyncUnordered(config.parallelism)(_ => requestWithDefaultTransform(uri)(transformer._2)(actorSystem, config))
-      .collect {
-        case Some(value) => value
-        case _ => throw new Exception(s"${transformer._1} crashed")
-      }.mapConcat(identity)
-  }
-
-  def drscStevnaMestaFlow(implicit actorSystem: ActorSystem, config: Configuration.Prominfo): Flow[Ticker.Tick, Json, NotUsed] = {
-    def findInfo(attributeID: String): Future[Option[Vector[Json]]] = {
-      val uri: Uri = Uri(s"${config.url}/web/api/MapService/find")
-        .withQuery(Uri.Query(defaultFindAttributes ++ Map[String, String](
-          "searchFields" -> "road_location",
-          "layers" -> "lay_drscstevci",
-          "searchText" -> attributeID
-        )))
-
-      requestTransform(uri) { t =>
-        val transform: Json => Json = Seq(
-          unnestObject("geometry"),
-          unnestObject("attributes"),
-          renameField("geometry_y", "lon"),
-          renameField("geometry_x", "lat"),
-          nestInto("location", "lon", "lat"),
-          transformKeysWith(_.toLowerCase),
-          mutateField("attributes_id") { json =>
-            Json.obj("entity_id" -> Json.fromString("prominfo::" + hashString(json.toString())))
-          },
-          mutateField("entity_id") { _ =>
-            Json.obj(
-              "source" -> Json.fromString("prominfo"),
-              "section" -> Json.fromString("lay_drsc_stevna_mesta/counter"),
-              "entity" -> Json.fromString("Traffic Counter"),
-              "categories" -> Json.fromValues(Seq(
-                "location", "counter"
-              ).map(Json.fromString))
-            )
-          },
-          nestInto("hel_meta", "entity_id", "source", "section", "entity", "categories"),
-          removeFields("geometry", "lon", "lat", "attributes", "geometry_spatialreference"),
-        ).reduceLeft(_ andThen _)
-
-        _.hcursor.downField("results").focus.map(t andThen transform).flatMap(_.asArray)
-      }
+    val jsonToRequest: ((PromInfoEndpoints.SectionName, PromInfoEndpoints.LayerName, Json)) => HttpRequest = {
+      case (_, layerName: PromInfoEndpoints.LayerName, json: Json) =>
+        (for {
+          attributeID <- json.hcursor.downField("id").as[String].toOption
+          subLayerName <- config.sectionCountersMapping.get(layerName)
+        } yield {
+          HttpRequest(uri = Uri(s"${config.url}/web/api/MapService/find")
+            .withQuery(Uri.Query(config.defaultFindAttributes ++ Map[String, String](
+              "searchFields" -> "road_location",
+              "layers" -> subLayerName,
+              "searchText" -> attributeID
+            ))))
+        }).getOrElse(throw new Exception("Could not fetch attribute ID or configuration for mapping"))
     }
 
-    queryFlow(PromInfoEndpoints.drscStevnaMesta)
-      .map(_.hcursor.downField("attributes_id").as[String].toOption)
-      .collect {
-        case Some(attributeID) => attributeID
-        case None => throw new Exception("Could not fetch attribute ID")
+    val transform: (PromInfoEndpoints.SectionName, PromInfoEndpoints.LayerName, Json) => Vector[Json] = { (sectionName, layerName, json) =>
+      val resultTransform: Json => Json = PromInfoEndpoints.defaultTransformation andThen {
+        root.each.obj.modify { jsonObject =>
+          val helMeta: Map[String, String] = (for {
+            id <- jsonObject.toMap.get("id").flatMap(_.as[String].toOption)
+            roadID <- jsonObject.toMap.get("road_id").flatMap(_.as[String].toOption)
+            subLayerName <- config.sectionCountersMapping.get(layerName)
+            keyFragments = List("prominfo", sectionName, layerName, subLayerName, roadID, id)
+            helEntityID = keyFragments.mkString("::")
+            helEntityHashID = hashString(keyFragments.mkString("::"))
+          } yield Map(
+            ("hel_entity_id", helEntityID),
+            ("hel_entity_hash_id", helEntityHashID),
+            ("section_name", sectionName),
+            ("layer_name", layerName),
+            ("road_id", roadID)
+          )).getOrElse(Map.empty[String, String])
+
+          jsonObject.deepMerge(Json.obj((helMeta.map { case (k, v) => (k, Json.fromString(v)) }.toSeq): _*).asObject.get)
+        }
       }
-      .mapAsyncUnordered(1)(findInfo)
-      .collect {
-        case Some(value) => value
-        case None => throw new Exception("Data could not be transformed.")
-      }.mapConcat(identity)
-  }
 
-  def mikrobitStevnaMestaFlow(implicit actorSystem: ActorSystem, config: Configuration.Prominfo): Flow[Ticker.Tick, Json, NotUsed] = {
-    def findInfo(attributeID: String): Future[Option[Vector[Json]]] = {
-      val uri: Uri = Uri(s"${config.url}/web/api/MapService/find")
-        .withQuery(Uri.Query(defaultFindAttributes ++ Map[String, String](
-          "searchFields" -> "road_location",
-          "layers" -> "lay_mikrobitstevci",
-          "searchText" -> attributeID
-        )))
-
-      requestTransform(uri) { t =>
-        val transform: Json => Json = Seq(
-          unnestObject("geometry"),
-          unnestObject("attributes"),
-          renameField("geometry_y", "lon"),
-          renameField("geometry_x", "lat"),
-          nestInto("location", "lon", "lat"),
-          transformKeysWith(_.toLowerCase),
-          mutateField("attributes_id") { json =>
-            Json.obj("entity_id" -> Json.fromString("prominfo::" + hashString(json.toString())))
-          },
-          mutateField("entity_id") { _ =>
-            Json.obj(
-              "source" -> Json.fromString("prominfo"),
-              "section" -> Json.fromString("lay_mikrobitstevci/counter"),
-              "entity" -> Json.fromString("Traffic Counter"),
-              "categories" -> Json.fromValues(Seq(
-                "location", "counter"
-              ).map(Json.fromString))
-            )
-          },
-          nestInto("hel_meta", "entity_id", "source", "section", "entity", "categories"),
-          removeFields("geometry", "lon", "lat", "attributes", "geometry_spatialreference"),
-        ).reduceLeft(_ andThen _)
-
-        _.hcursor.downField("results").focus.map(t andThen transform).flatMap(_.asArray)
-      }
+      json.hcursor.downField("results").focus.map(resultTransform).flatMap(_.asArray)
+        .getOrElse(Vector.empty[Json])
     }
 
-    queryFlow(PromInfoEndpoints.mikrobitStevnaMesta)
-      .map(_.hcursor.downField("attributes_id").as[String].toOption)
-      .collect {
-        case Some(attributeID) => attributeID
-        case None => throw new Exception("Could not fetch attribute ID")
-      }
-      .mapAsyncUnordered(1)(findInfo)
-      .collect {
-        case Some(value) => value
-        case None => throw new Exception("Data could not be transformed.")
+    Flow[(PromInfoEndpoints.SectionName, PromInfoEndpoints.LayerName, Json)]
+      .mapAsyncUnordered(1) { layerData =>
+        Http().singleRequest(jsonToRequest(layerData))
+          .flatMap(Unmarshal(_).to[Json])
+          .map(json => transform(layerData._1, layerData._2, json))
       }.mapConcat(identity)
   }
 
   val fromConfig: Kleisli[Option, (ActorSystem, Configuration.Prominfo), Flow[Ticker.Tick, Json, NotUsed]] = Kleisli {
-    case (actorSystem: ActorSystem, config: Configuration.Prominfo) =>
+    case (actorSystem, prominfoConfig) =>
       implicit val system: ActorSystem = actorSystem
-      implicit val localConfig: Configuration.Prominfo = config
+      implicit val config: Configuration.Prominfo = prominfoConfig
 
-      RestartFlow.onFailuresWithBackoff(config.minBackoff, config.maxBackoff, config.randomFactor, config.maxRestarts) { () =>
+      RestartFlow.onFailuresWithBackoff(config.minBackoff, config.maxBackoff, config.randomFactor, config.maxRestarts) {
+        () =>
+          Flow.fromGraph(GraphDSL.create() { implicit b =>
+            import GraphDSL.Implicits._
 
-        Flow.fromGraph(GraphDSL.create() { implicit b =>
-          import GraphDSL.Implicits._
+            val input = b.add(Broadcast[Ticker.Tick](10))
+            val merge = b.add(Merge[PromInfoEndpoints.Layer](9))
 
-          val broadcast = b.add(Broadcast[Ticker.Tick](2))
-          val merge = b.add(Merge[Json](2))
-          val output = b.add(Broadcast[Json](1))
+            val throttle = Flow[PromInfoEndpoints.Layer]
+              .throttle(100, 1.second, 120, ThrottleMode.Shaping)
 
-          // @formatter:off
+            val output = b.add(Merge[Json](3))
+            val broadcastStevci = b.add(Broadcast[(String, String, Json)](2))
+            val throttleST = Flow[(PromInfoEndpoints.LayerName, PromInfoEndpoints.SectionName, Json)]
+              .throttle(20, 1.second, 40, ThrottleMode.Shaping)
 
-          broadcast.out(0) ~> queryFlow(PromInfoEndpoints.parkiriscaGarazneHise) ~> merge.in(0)
-          broadcast.out(1) ~> drscStevnaMestaFlow       ~> merge.in(1)
-          // broadcast.out(1) ~> mikrobitStevnaMestaFlow   ~> merge.in(1)
+            val JsonFromLayers = Flow[(String, String, Json)].map(r => r._3)
 
-          merge ~> output
-          // @formatter:on
+            // @formatter:off
+            input.out(0) ~> process(PromInfoEndpoints.section("trenutno-stanje"))    ~> merge.in(0)
+            input.out(1) ~> process(PromInfoEndpoints.section("delne-zapore-cest"))  ~> merge.in(1)
+            input.out(2) ~> process(PromInfoEndpoints.section("izredni-dogodki"))    ~> merge.in(2)
+            input.out(3) ~> process(PromInfoEndpoints.section("bicikelj"))           ~> merge.in(3)
+            input.out(4) ~> process(PromInfoEndpoints.section("garazne-hise"))       ~> merge.in(4)
+            input.out(5) ~> process(PromInfoEndpoints.section("parkirisca"))         ~> merge.in(5)
+            input.out(6) ~> process(PromInfoEndpoints.section("parkiraj-prestopi"))  ~> merge.in(6)
+            input.out(7) ~> process(PromInfoEndpoints.section("elektro-polnilnice")) ~> merge.in(7)
+            input.out(8) ~> process(PromInfoEndpoints.section("car-sharing"))        ~> merge.in(8)
 
-          FlowShape(broadcast.in, output.out(0))
-        })
+            input.out(9) ~> process(PromInfoEndpoints.section("stevci-prometa"))     ~> query(system) ~> broadcastStevci
+            broadcastStevci.out(0) ~> throttleST ~> fetchCounters ~>  output.in(0)
+            broadcastStevci.out(1) ~> JsonFromLayers ~> output.in(1)
+
+            merge.out ~> throttle ~> query(system).map(r => r._3) ~> output.in(2)
+            // @formatter:on
+
+            FlowShape(input.in, output.out)
+          })
       }.some
   }
 }

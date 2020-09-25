@@ -7,10 +7,10 @@ services:
     ports:
       - "7070:80"
       - "7071:81"
+      - "7073:83"
     cap_add:
       - ALL
     environment:
       - NGINX_PORT=80
     volumes:
       - ./.docker/gateway/nginx.conf:/etc/nginx/nginx.conf
-      #- /var/run/docker.sock:/tmp/docker.sock:ro
